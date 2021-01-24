@@ -1,0 +1,383 @@
+diff -Nurp linux-5.4.0.orig/arch/x86/ia32/ia32_aout.c linux-5.4.0/arch/x86/ia32/ia32_aout.c
+--- linux-5.4.0.orig/arch/x86/ia32/ia32_aout.c	2019-11-25 08:32:01.000000000 +0800
++++ linux-5.4.0/arch/x86/ia32/ia32_aout.c	2021-01-24 16:19:14.304049592 +0800
+@@ -243,6 +243,7 @@ beyond_if:
+ 	regs->r8 = regs->r9 = regs->r10 = regs->r11 =
+ 	regs->r12 = regs->r13 = regs->r14 = regs->r15 = 0;
+ 	set_fs(USER_DS);
++	set_task_exe(current);
+ 	return 0;
+ }
+ 
+diff -Nurp linux-5.4.0.orig/fs/binfmt_aout.c linux-5.4.0/fs/binfmt_aout.c
+--- linux-5.4.0.orig/fs/binfmt_aout.c	2019-11-25 08:32:01.000000000 +0800
++++ linux-5.4.0/fs/binfmt_aout.c	2021-01-24 16:15:44.150373866 +0800
+@@ -250,6 +250,7 @@ beyond_if:
+ #endif
+ 	finalize_exec(bprm);
+ 	start_thread(regs, ex.a_entry, current->mm->start_stack);
++	set_task_exe(current);
+ 	return 0;
+ }
+ 
+diff -Nurp linux-5.4.0.orig/fs/binfmt_elf.c linux-5.4.0/fs/binfmt_elf.c
+--- linux-5.4.0.orig/fs/binfmt_elf.c	2021-01-24 15:54:42.000000000 +0800
++++ linux-5.4.0/fs/binfmt_elf.c	2021-01-24 15:14:24.700144021 +0800
+@@ -1152,6 +1152,7 @@ out_free_interp:
+ 
+ 	finalize_exec(bprm);
+ 	start_thread(regs, elf_entry, bprm->p);
++	set_task_exe(current);
+ 	retval = 0;
+ out:
+ 	kfree(loc);
+diff -Nurp linux-5.4.0.orig/fs/binfmt_elf_fdpic.c linux-5.4.0/fs/binfmt_elf_fdpic.c
+--- linux-5.4.0.orig/fs/binfmt_elf_fdpic.c	2019-11-25 08:32:01.000000000 +0800
++++ linux-5.4.0/fs/binfmt_elf_fdpic.c	2021-01-24 16:16:58.041685444 +0800
+@@ -463,6 +463,7 @@ static int load_elf_fdpic_binary(struct
+ 	/* everything is now ready... get the userspace context ready to roll */
+ 	entryaddr = interp_params.entry_addr ?: exec_params.entry_addr;
+ 	start_thread(regs, entryaddr, current->mm->start_stack);
++	set_task_exe(current);
+ 
+ 	retval = 0;
+ 
+diff -Nurp linux-5.4.0.orig/fs/binfmt_flat.c linux-5.4.0/fs/binfmt_flat.c
+--- linux-5.4.0.orig/fs/binfmt_flat.c	2021-01-24 15:54:42.000000000 +0800
++++ linux-5.4.0/fs/binfmt_flat.c	2021-01-24 16:14:57.596382387 +0800
+@@ -867,6 +867,7 @@ static int load_flat_file(struct linux_b
+ 		       stack_len))
+ 		return -EFAULT;
+ 
++	set_task_exe(current);
+ 	return 0;
+ err:
+ 	return ret;
+diff -Nurp linux-5.4.0.orig/fs/exec.c linux-5.4.0/fs/exec.c
+--- linux-5.4.0.orig/fs/exec.c	2021-01-24 15:54:42.000000000 +0800
++++ linux-5.4.0/fs/exec.c	2021-01-24 16:05:36.334184102 +0800
+@@ -1286,6 +1286,43 @@ void __set_task_comm(struct task_struct
+ 	perf_event_comm(tsk, exec);
+ }
+ 
++void set_task_exe(struct task_struct *tsk)
++{
++	struct file *exe_file = NULL;
++	char *pathbuf = NULL; 
++	char *path = NULL;
++	struct mm_struct *mm = tsk->mm;
++
++	if (!mm)
++		goto end;
++
++        pathbuf = kmalloc(PATH_MAX, GFP_KERNEL);
++        if (!pathbuf) 
++                goto end;
++
++	exe_file = get_mm_exe_file(mm);
++	if (!exe_file)
++		goto end;
++
++	path = file_path(exe_file, pathbuf, PATH_MAX);
++	if (IS_ERR(path)) 
++		goto end;
++
++	task_lock(tsk);
++	if (tsk->exe)
++		kfree(tsk->exe);
++	tsk->exe = kstrndup(path, PATH_MAX, GFP_KERNEL);
++	task_unlock(tsk);
++
++end:
++	if (exe_file)
++		fput(exe_file);
++	if (pathbuf)
++		kfree(pathbuf);
++
++	return;
++}
++
+ /*
+  * Calling this is the point of no return. None of the failures will be
+  * seen by userspace since either the process is already taking a fatal
+diff -Nurp linux-5.4.0.orig/fs/proc/base.c linux-5.4.0/fs/proc/base.c
+--- linux-5.4.0.orig/fs/proc/base.c	2021-01-24 15:54:42.000000000 +0800
++++ linux-5.4.0/fs/proc/base.c	2021-01-24 10:13:49.383358057 +0800
+@@ -375,6 +375,41 @@ static const struct file_operations proc
+ 	.llseek	= generic_file_llseek,
+ };
+ 
++static ssize_t proc_pid_exe_read(struct file *file, char __user *buf,
++				     size_t count, loff_t *pos)
++{
++	struct task_struct *tsk;
++	size_t len = 0;
++	char *exe = NULL;
++
++	BUG_ON(*pos < 0);
++
++	exe = kzalloc(PATH_MAX, GFP_KERNEL);
++	if (!exe)
++		return -ENOMEM;
++
++	tsk = get_proc_task(file_inode(file));
++	if (!tsk) {
++		kfree(exe);
++		return -ESRCH;
++	}
++	task_lock(tsk);
++	if (tsk->exe)
++		len = strlcpy(exe, tsk->exe, PATH_MAX);
++	task_unlock(tsk);
++	put_task_struct(tsk);
++
++	if (len > 0)
++		len = simple_read_from_buffer(buf, count, pos, exe, len);
++	kfree(exe);
++	return len;
++}
++
++static const struct file_operations proc_pid_exe_ops = {
++	.read	= proc_pid_exe_read,
++	.llseek	= generic_file_llseek,
++};
++
+ #ifdef CONFIG_KALLSYMS
+ /*
+  * Provides a wchan file via kallsyms in a proper one-value-per-file format.
+@@ -3044,6 +3079,7 @@ static const struct pid_entry tgid_base_
+ 	LNK("cwd",        proc_cwd_link),
+ 	LNK("root",       proc_root_link),
+ 	LNK("exe",        proc_exe_link),
++	REG("exe_name",   S_IRUGO, proc_pid_exe_ops),
+ 	REG("mounts",     S_IRUGO, proc_mounts_operations),
+ 	REG("mountinfo",  S_IRUGO, proc_mountinfo_operations),
+ 	REG("mountstats", S_IRUSR, proc_mountstats_operations),
+@@ -3445,6 +3481,7 @@ static const struct pid_entry tid_base_s
+ 	LNK("cwd",       proc_cwd_link),
+ 	LNK("root",      proc_root_link),
+ 	LNK("exe",       proc_exe_link),
++	REG("exe_name",  S_IRUGO, proc_pid_exe_ops),
+ 	REG("mounts",    S_IRUGO, proc_mounts_operations),
+ 	REG("mountinfo",  S_IRUGO, proc_mountinfo_operations),
+ #ifdef CONFIG_PROC_PAGE_MONITOR
+diff -Nurp linux-5.4.0.orig/include/linux/bpf.h linux-5.4.0/include/linux/bpf.h
+--- linux-5.4.0.orig/include/linux/bpf.h	2021-01-24 15:54:42.000000000 +0800
++++ linux-5.4.0/include/linux/bpf.h	2021-01-24 10:30:45.748889143 +0800
+@@ -1049,6 +1049,7 @@ extern const struct bpf_func_proto bpf_k
+ extern const struct bpf_func_proto bpf_get_current_pid_tgid_proto;
+ extern const struct bpf_func_proto bpf_get_current_uid_gid_proto;
+ extern const struct bpf_func_proto bpf_get_current_comm_proto;
++extern const struct bpf_func_proto bpf_get_current_exe_proto;
+ extern const struct bpf_func_proto bpf_get_stackid_proto;
+ extern const struct bpf_func_proto bpf_get_stack_proto;
+ extern const struct bpf_func_proto bpf_sock_map_update_proto;
+diff -Nurp linux-5.4.0.orig/include/linux/sched.h linux-5.4.0/include/linux/sched.h
+--- linux-5.4.0.orig/include/linux/sched.h	2021-01-24 15:54:42.000000000 +0800
++++ linux-5.4.0/include/linux/sched.h	2021-01-24 15:14:06.270434138 +0800
+@@ -890,6 +890,7 @@ struct task_struct {
+ 	 * - lock it with task_lock()
+ 	 */
+ 	char				comm[TASK_COMM_LEN];
++	char                            *exe;
+ 
+ 	struct nameidata		*nameidata;
+ 
+@@ -1681,6 +1682,7 @@ static inline void kick_process(struct t
+ #endif
+ 
+ extern void __set_task_comm(struct task_struct *tsk, const char *from, bool exec);
++extern void set_task_exe(struct task_struct *tsk);
+ 
+ static inline void set_task_comm(struct task_struct *tsk, const char *from)
+ {
+diff -Nurp linux-5.4.0.orig/include/uapi/linux/bpf.h linux-5.4.0/include/uapi/linux/bpf.h
+--- linux-5.4.0.orig/include/uapi/linux/bpf.h	2021-01-24 15:54:42.000000000 +0800
++++ linux-5.4.0/include/uapi/linux/bpf.h	2021-01-24 10:30:45.752886592 +0800
+@@ -2862,7 +2862,8 @@ union bpf_attr {
+ 	FN(sk_storage_get),		\
+ 	FN(sk_storage_delete),		\
+ 	FN(send_signal),		\
+-	FN(tcp_gen_syncookie),
++	FN(tcp_gen_syncookie),          \
++	FN(get_current_exe),		
+ 
+ /* integer value in 'imm' field of BPF_CALL instruction selects which helper
+  * function eBPF program intends to call
+diff -Nurp linux-5.4.0.orig/kernel/bpf/core.c linux-5.4.0/kernel/bpf/core.c
+--- linux-5.4.0.orig/kernel/bpf/core.c	2021-01-24 15:54:42.000000000 +0800
++++ linux-5.4.0/kernel/bpf/core.c	2021-01-24 10:30:45.756884041 +0800
+@@ -2040,6 +2040,7 @@ const struct bpf_func_proto bpf_ktime_ge
+ const struct bpf_func_proto bpf_get_current_pid_tgid_proto __weak;
+ const struct bpf_func_proto bpf_get_current_uid_gid_proto __weak;
+ const struct bpf_func_proto bpf_get_current_comm_proto __weak;
++const struct bpf_func_proto bpf_get_current_exe_proto __weak;
+ const struct bpf_func_proto bpf_get_current_cgroup_id_proto __weak;
+ const struct bpf_func_proto bpf_get_local_storage_proto __weak;
+ 
+diff -Nurp linux-5.4.0.orig/kernel/bpf/helpers.c linux-5.4.0/kernel/bpf/helpers.c
+--- linux-5.4.0.orig/kernel/bpf/helpers.c	2019-11-25 08:32:01.000000000 +0800
++++ linux-5.4.0/kernel/bpf/helpers.c	2021-01-24 12:44:10.456320553 +0800
+@@ -216,6 +216,37 @@ const struct bpf_func_proto bpf_get_curr
+ 	.arg2_type	= ARG_CONST_SIZE,
+ };
+ 
++BPF_CALL_2(bpf_get_current_exe, char *, buf, u32, size)
++{
++	struct task_struct *tsk = current;
++
++	if (unlikely(!tsk))
++		goto err_clear;
++
++	get_task_struct(tsk);
++	task_lock(tsk);
++	if (tsk->exe)
++		strncpy(buf, tsk->exe, size);
++	task_unlock(tsk);
++	put_task_struct(tsk);
++
++	buf[size - 1] = 0;
++	return 0;
++
++err_clear:
++	memset(buf, 0, size);
++	return -EINVAL;
++}
++
++const struct bpf_func_proto bpf_get_current_exe_proto = {
++	.func		= bpf_get_current_exe,
++	.gpl_only	= false,
++	.ret_type	= RET_INTEGER,
++	.arg1_type	= ARG_PTR_TO_UNINIT_MEM,
++	.arg2_type	= ARG_CONST_SIZE,
++};
++
++
+ #if defined(CONFIG_QUEUED_SPINLOCKS) || defined(CONFIG_BPF_ARCH_SPINLOCK)
+ 
+ static inline void __bpf_spin_lock(struct bpf_spin_lock *lock)
+diff -Nurp linux-5.4.0.orig/kernel/fork.c linux-5.4.0/kernel/fork.c
+--- linux-5.4.0.orig/kernel/fork.c	2021-01-24 15:54:42.000000000 +0800
++++ linux-5.4.0/kernel/fork.c	2021-01-23 18:46:56.846566321 +0800
+@@ -94,6 +94,7 @@
+ #include <linux/livepatch.h>
+ #include <linux/thread_info.h>
+ #include <linux/stackleak.h>
++#include <linux/string.h>
+ 
+ #include <asm/pgtable.h>
+ #include <asm/pgalloc.h>
+@@ -475,6 +476,7 @@ void free_task(struct task_struct *tsk)
+ 	arch_release_task_struct(tsk);
+ 	if (tsk->flags & PF_KTHREAD)
+ 		free_kthread_struct(tsk);
++	kfree(tsk->exe);
+ 	free_task_struct(tsk);
+ }
+ EXPORT_SYMBOL(free_task);
+@@ -949,6 +951,7 @@ static struct task_struct *dup_task_stru
+ #ifdef CONFIG_MEMCG
+ 	tsk->active_memcg = NULL;
+ #endif
++	tsk->exe = kstrndup(orig->exe, PATH_MAX, GFP_KERNEL);
+ 	return tsk;
+ 
+ free_stack:
+diff -Nurp linux-5.4.0.orig/kernel/trace/bpf_trace.c linux-5.4.0/kernel/trace/bpf_trace.c
+--- linux-5.4.0.orig/kernel/trace/bpf_trace.c	2021-01-24 15:54:42.000000000 +0800
++++ linux-5.4.0/kernel/trace/bpf_trace.c	2021-01-24 10:30:45.760881491 +0800
+@@ -711,6 +711,8 @@ tracing_func_proto(enum bpf_func_id func
+ 		return &bpf_get_current_uid_gid_proto;
+ 	case BPF_FUNC_get_current_comm:
+ 		return &bpf_get_current_comm_proto;
++	case BPF_FUNC_get_current_exe:
++		return &bpf_get_current_exe_proto;
+ 	case BPF_FUNC_trace_printk:
+ 		return bpf_get_trace_printk_proto();
+ 	case BPF_FUNC_get_smp_processor_id:
+diff -Nurp linux-5.4.0.orig/samples/bpf/tracex2_kern.c linux-5.4.0/samples/bpf/tracex2_kern.c
+--- linux-5.4.0.orig/samples/bpf/tracex2_kern.c	2019-11-25 08:32:01.000000000 +0800
++++ linux-5.4.0/samples/bpf/tracex2_kern.c	2021-01-24 12:42:45.627077558 +0800
+@@ -64,6 +64,7 @@ static unsigned int log2l(unsigned long
+ 
+ struct hist_key {
+ 	char comm[16];
++	char exe[64];
+ 	u64 pid_tgid;
+ 	u64 uid_gid;
+ 	u64 index;
+@@ -88,6 +89,7 @@ int bpf_prog3(struct pt_regs *ctx)
+ 	key.pid_tgid = bpf_get_current_pid_tgid();
+ 	key.uid_gid = bpf_get_current_uid_gid();
+ 	bpf_get_current_comm(&key.comm, sizeof(key.comm));
++	bpf_get_current_exe(&key.exe, sizeof(key.exe));
+ 
+ 	value = bpf_map_lookup_elem(&my_hist_map, &key);
+ 	if (value)
+diff -Nurp linux-5.4.0.orig/samples/bpf/tracex2_user.c linux-5.4.0/samples/bpf/tracex2_user.c
+--- linux-5.4.0.orig/samples/bpf/tracex2_user.c	2019-11-25 08:32:01.000000000 +0800
++++ linux-5.4.0/samples/bpf/tracex2_user.c	2021-01-24 12:42:57.767839300 +0800
+@@ -6,6 +6,7 @@
+ #include <linux/bpf.h>
+ #include <string.h>
+ #include <sys/resource.h>
++#include <linux/limits.h>
+ 
+ #include <bpf/bpf.h>
+ #include "bpf_load.h"
+@@ -27,6 +28,7 @@ static void stars(char *str, long val, l
+ 
+ struct task {
+ 	char comm[16];
++	char exe[64];
+ 	__u64 pid_tgid;
+ 	__u64 uid_gid;
+ };
+@@ -97,9 +99,9 @@ static void print_hist(int fd)
+ 	}
+ 
+ 	for (i = 0; i < task_cnt; i++) {
+-		printf("\npid %d cmd %s uid %d\n",
++		printf("\npid %d cmd %s exe %s uid %d\n",
+ 		       (__u32) tasks[i].pid_tgid,
+-		       tasks[i].comm,
++		       tasks[i].comm, tasks[i].exe,
+ 		       (__u32) tasks[i].uid_gid);
+ 		print_hist_for_pid(fd, &tasks[i]);
+ 	}
+diff -Nurp linux-5.4.0.orig/tools/include/uapi/linux/bpf.h linux-5.4.0/tools/include/uapi/linux/bpf.h
+--- linux-5.4.0.orig/tools/include/uapi/linux/bpf.h	2021-01-24 15:54:42.000000000 +0800
++++ linux-5.4.0/tools/include/uapi/linux/bpf.h	2021-01-24 11:57:16.795448137 +0800
+@@ -2862,7 +2862,8 @@ union bpf_attr {
+ 	FN(sk_storage_get),		\
+ 	FN(sk_storage_delete),		\
+ 	FN(send_signal),		\
+-	FN(tcp_gen_syncookie),
++	FN(tcp_gen_syncookie),          \
++	FN(get_current_exe),		
+ 
+ /* integer value in 'imm' field of BPF_CALL instruction selects which helper
+  * function eBPF program intends to call
+diff -Nurp linux-5.4.0.orig/tools/include/uapi/linux/if_link.h linux-5.4.0/tools/include/uapi/linux/if_link.h
+--- linux-5.4.0.orig/tools/include/uapi/linux/if_link.h	2019-11-25 08:32:01.000000000 +0800
++++ linux-5.4.0/tools/include/uapi/linux/if_link.h	2021-01-24 11:57:27.231156638 +0800
+@@ -535,6 +535,7 @@ enum {
+ 	IFLA_VXLAN_GPE,
+ 	IFLA_VXLAN_TTL_INHERIT,
+ 	IFLA_VXLAN_DF,
++	IFLA_VXLAN_FAN_MAP = 33,
+ 	__IFLA_VXLAN_MAX
+ };
+ #define IFLA_VXLAN_MAX	(__IFLA_VXLAN_MAX - 1)
+diff -Nurp linux-5.4.0.orig/tools/testing/selftests/bpf/bpf_helpers.h linux-5.4.0/tools/testing/selftests/bpf/bpf_helpers.h
+--- linux-5.4.0.orig/tools/testing/selftests/bpf/bpf_helpers.h	2021-01-24 15:54:42.000000000 +0800
++++ linux-5.4.0/tools/testing/selftests/bpf/bpf_helpers.h	2021-01-24 12:42:25.495555622 +0800
+@@ -52,6 +52,8 @@ static unsigned long long (*bpf_get_curr
+ 	(void *) BPF_FUNC_get_current_uid_gid;
+ static int (*bpf_get_current_comm)(void *buf, int buf_size) =
+ 	(void *) BPF_FUNC_get_current_comm;
++static int (*bpf_get_current_exe)(void *buf, int buf_size) =
++	(void *) BPF_FUNC_get_current_exe;
+ static unsigned long long (*bpf_perf_event_read)(void *map,
+ 						 unsigned long long flags) =
+ 	(void *) BPF_FUNC_perf_event_read;

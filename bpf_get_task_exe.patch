@@ -1,0 +1,167 @@
+diff -Nurp linux-5.4.0.orig/include/linux/bpf.h linux-5.4.0/include/linux/bpf.h
+--- linux-5.4.0.orig/include/linux/bpf.h	2021-01-23 14:26:30.000000000 +0800
++++ linux-5.4.0/include/linux/bpf.h	2021-01-22 21:30:21.334033627 +0800
+@@ -1049,6 +1049,7 @@ extern const struct bpf_func_proto bpf_k
+ extern const struct bpf_func_proto bpf_get_current_pid_tgid_proto;
+ extern const struct bpf_func_proto bpf_get_current_uid_gid_proto;
+ extern const struct bpf_func_proto bpf_get_current_comm_proto;
++extern const struct bpf_func_proto bpf_get_current_exe_proto;
+ extern const struct bpf_func_proto bpf_get_stackid_proto;
+ extern const struct bpf_func_proto bpf_get_stack_proto;
+ extern const struct bpf_func_proto bpf_sock_map_update_proto;
+diff -Nurp linux-5.4.0.orig/include/uapi/linux/bpf.h linux-5.4.0/include/uapi/linux/bpf.h
+--- linux-5.4.0.orig/include/uapi/linux/bpf.h	2021-01-23 14:26:30.000000000 +0800
++++ linux-5.4.0/include/uapi/linux/bpf.h	2021-01-22 21:34:25.859149334 +0800
+@@ -2862,7 +2862,8 @@ union bpf_attr {
+ 	FN(sk_storage_get),		\
+ 	FN(sk_storage_delete),		\
+ 	FN(send_signal),		\
+-	FN(tcp_gen_syncookie),
++	FN(tcp_gen_syncookie),          \
++	FN(get_current_exe),		
+ 
+ /* integer value in 'imm' field of BPF_CALL instruction selects which helper
+  * function eBPF program intends to call
+diff -Nurp linux-5.4.0.orig/kernel/bpf/core.c linux-5.4.0/kernel/bpf/core.c
+--- linux-5.4.0.orig/kernel/bpf/core.c	2021-01-23 14:26:30.000000000 +0800
++++ linux-5.4.0/kernel/bpf/core.c	2021-01-22 21:31:59.278282918 +0800
+@@ -2040,6 +2040,7 @@ const struct bpf_func_proto bpf_ktime_ge
+ const struct bpf_func_proto bpf_get_current_pid_tgid_proto __weak;
+ const struct bpf_func_proto bpf_get_current_uid_gid_proto __weak;
+ const struct bpf_func_proto bpf_get_current_comm_proto __weak;
++const struct bpf_func_proto bpf_get_current_exe_proto __weak;
+ const struct bpf_func_proto bpf_get_current_cgroup_id_proto __weak;
+ const struct bpf_func_proto bpf_get_local_storage_proto __weak;
+ 
+diff -Nurp linux-5.4.0.orig/kernel/bpf/helpers.c linux-5.4.0/kernel/bpf/helpers.c
+--- linux-5.4.0.orig/kernel/bpf/helpers.c	2019-11-25 08:32:01.000000000 +0800
++++ linux-5.4.0/kernel/bpf/helpers.c	2021-01-23 14:39:20.689859960 +0800
+@@ -216,6 +216,66 @@ const struct bpf_func_proto bpf_get_curr
+ 	.arg2_type	= ARG_CONST_SIZE,
+ };
+ 
++static int get_task_exe(char *buf, int buflen, struct task_struct *task)
++{
++	int ret = -1;
++	struct file *exe_file = NULL;
++	char *p = NULL;
++
++	exe_file = get_task_exe_file(task);
++	if (exe_file) {
++		p = d_path(&(exe_file->f_path), buf, buflen - 1);
++		fput(exe_file);
++
++		if (IS_ERR_OR_NULL(p)) {
++			ret = -1;
++		} else {
++			ret = strlen(p);
++			memmove(buf, p, ret);
++			buf[ret] = '\0';
++		}
++	}
++
++	return ret;
++}
++
++BPF_CALL_2(bpf_get_current_exe, char *, buf, u32, size)
++{
++	struct task_struct *task = current;
++	char *path_buf  = NULL;
++	int ret = -1;
++
++	path_buf = kmalloc(PATH_MAX, GFP_ATOMIC);
++	if (!path_buf)
++		goto err_clear;
++	if (unlikely(!task))
++		goto err_clear;
++
++	ret = get_task_exe(path_buf, PATH_MAX, task);
++	if (ret < 0)
++		goto err_clear;
++	strncpy(buf, path_buf, size);
++
++	buf[size - 1] = 0;
++	kfree(path_buf);	
++	return 0;
++
++err_clear:
++	if (path_buf)
++		kfree(path_buf);	
++	memset(buf, 0, size);
++	return -EINVAL;
++}
++
++const struct bpf_func_proto bpf_get_current_exe_proto = {
++	.func		= bpf_get_current_exe,
++	.gpl_only	= false,
++	.ret_type	= RET_INTEGER,
++	.arg1_type	= ARG_PTR_TO_UNINIT_MEM,
++	.arg2_type	= ARG_CONST_SIZE,
++};
++
++
+ #if defined(CONFIG_QUEUED_SPINLOCKS) || defined(CONFIG_BPF_ARCH_SPINLOCK)
+ 
+ static inline void __bpf_spin_lock(struct bpf_spin_lock *lock)
+diff -Nurp linux-5.4.0.orig/kernel/trace/bpf_trace.c linux-5.4.0/kernel/trace/bpf_trace.c
+--- linux-5.4.0.orig/kernel/trace/bpf_trace.c	2021-01-23 14:26:30.000000000 +0800
++++ linux-5.4.0/kernel/trace/bpf_trace.c	2021-01-22 21:32:50.560658164 +0800
+@@ -711,6 +711,8 @@ tracing_func_proto(enum bpf_func_id func
+ 		return &bpf_get_current_uid_gid_proto;
+ 	case BPF_FUNC_get_current_comm:
+ 		return &bpf_get_current_comm_proto;
++	case BPF_FUNC_get_current_exe:
++		return &bpf_get_current_exe_proto;
+ 	case BPF_FUNC_trace_printk:
+ 		return bpf_get_trace_printk_proto();
+ 	case BPF_FUNC_get_smp_processor_id:
+diff -Nurp linux-5.4.0.orig/samples/bpf/tracex2_kern.c linux-5.4.0/samples/bpf/tracex2_kern.c
+--- linux-5.4.0.orig/samples/bpf/tracex2_kern.c	2019-11-25 08:32:01.000000000 +0800
++++ linux-5.4.0/samples/bpf/tracex2_kern.c	2021-01-23 12:38:59.007779807 +0800
+@@ -64,6 +64,7 @@ static unsigned int log2l(unsigned long
+ 
+ struct hist_key {
+ 	char comm[16];
++	char exe[256];
+ 	u64 pid_tgid;
+ 	u64 uid_gid;
+ 	u64 index;
+@@ -88,6 +89,7 @@ int bpf_prog3(struct pt_regs *ctx)
+ 	key.pid_tgid = bpf_get_current_pid_tgid();
+ 	key.uid_gid = bpf_get_current_uid_gid();
+ 	bpf_get_current_comm(&key.comm, sizeof(key.comm));
++	bpf_get_current_exe(&key.exe, sizeof(key.exe));
+ 
+ 	value = bpf_map_lookup_elem(&my_hist_map, &key);
+ 	if (value)
+diff -Nurp linux-5.4.0.orig/samples/bpf/tracex2_user.c linux-5.4.0/samples/bpf/tracex2_user.c
+--- linux-5.4.0.orig/samples/bpf/tracex2_user.c	2019-11-25 08:32:01.000000000 +0800
++++ linux-5.4.0/samples/bpf/tracex2_user.c	2021-01-23 12:39:14.311547174 +0800
+@@ -6,6 +6,7 @@
+ #include <linux/bpf.h>
+ #include <string.h>
+ #include <sys/resource.h>
++#include <linux/limits.h>
+ 
+ #include <bpf/bpf.h>
+ #include "bpf_load.h"
+@@ -27,6 +28,7 @@ static void stars(char *str, long val, l
+ 
+ struct task {
+ 	char comm[16];
++	char exe[256];
+ 	__u64 pid_tgid;
+ 	__u64 uid_gid;
+ };
+@@ -97,9 +99,9 @@ static void print_hist(int fd)
+ 	}
+ 
+ 	for (i = 0; i < task_cnt; i++) {
+-		printf("\npid %d cmd %s uid %d\n",
++		printf("\npid %d cmd %s exe %s uid %d\n",
+ 		       (__u32) tasks[i].pid_tgid,
+-		       tasks[i].comm,
++		       tasks[i].comm, tasks[i].exe, 
+ 		       (__u32) tasks[i].uid_gid);
+ 		print_hist_for_pid(fd, &tasks[i]);
+ 	}
