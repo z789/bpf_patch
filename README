@@ -1,11 +1,18 @@
-为kernel v5.4.0增加 bpf的 get_current_exe支持。 即增加获取task的可执行文件全路径。
+为kernel v5.4.0增加 bpf的 get_current_exe支持。 即获取task的可执行文件全路径。
 
 bpf_get_task_exe.patch：
-      按照 /proc/pid/exe 一样的方式获取可执行文件全路径。 这种方式需要文件系统的频繁查找，存在睡眠。
+      按照 /proc/pid/exe 一样的方式获取可执行文件全路径。 这种方式需要文件系统的频繁查找。
 
 bpf_get_task_exe_2.patch：
       1.  在task_struct 结构中增加char *exe字段。 execve新的程序时， 获取可执行文件全路径并保存在该指针中。
           这样获取可执行文件全路径时，仅仅从该字段复制即可。 减少了不必要的文件系统操作。 拿空间换时间。
       2.  在每个task的 /proc/pid/目录下增加 exe_name文件， 该文件内容与 软链接/proc/pid/exe的值一样。 从该文件取值
-          比从 软链接/proc/pid/exe取值效率高。                     
+
+bpf_get_task_exe_3.10.0-1160.11.1.patch:
+      centos7 kernel v3.10.0-1160.11.1的exe patch
+
+bpftrace_exe-0.11.4.patch:
+     bpftrace v0.11.4版本增加内置变量exe。
+     因为bpftrace 字符串最多64字节， 所以exe可能发生截断。
+
 

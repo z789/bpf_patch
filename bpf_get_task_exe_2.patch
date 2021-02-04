@@ -116,7 +116,7 @@ diff -Nurp linux-5.4.0.orig/fs/proc/base.c linux-5.4.0/fs/proc/base.c
 +
 +	BUG_ON(*pos < 0);
 +
-+	exe = kzalloc(PATH_MAX, GFP_KERNEL);
++	exe = kzalloc(PATH_MAX, GFP_ATOMIC);
 +	if (!exe)
 +		return -ENOMEM;
 +
