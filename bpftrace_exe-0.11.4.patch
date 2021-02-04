@@ -1,0 +1,133 @@
+diff -Nurp bpftrace-0.11.4.orig/src/ast/codegen_llvm.cpp bpftrace-0.11.4/src/ast/codegen_llvm.cpp
+--- bpftrace-0.11.4.orig/src/ast/codegen_llvm.cpp	2020-11-14 09:16:51.000000000 +0800
++++ bpftrace-0.11.4/src/ast/codegen_llvm.cpp	2021-02-04 15:09:44.626136885 +0800
+@@ -173,6 +173,14 @@ void CodegenLLVM::visit(Builtin &builtin
+     b_.CreateGetCurrentComm(ctx_, buf, builtin.type.size, builtin.loc);
+     expr_ = buf;
+   }
++  else if (builtin.ident == "exe")
++  {
++    AllocaInst *buf = b_.CreateAllocaBPF(builtin.type, "exe");
++    // initializing memory needed for older kernels:
++    b_.CREATE_MEMSET(buf, b_.getInt8(0), builtin.type.size, 1);
++    b_.CreateGetCurrentExe(ctx_, buf, builtin.type.size, builtin.loc);
++    expr_ = buf;
++  }
+   else if ((!builtin.ident.compare(0, 3, "arg") && builtin.ident.size() == 4 &&
+       builtin.ident.at(3) >= '0' && builtin.ident.at(3) <= '9') ||
+       builtin.ident == "retval" ||
+diff -Nurp bpftrace-0.11.4.orig/src/ast/irbuilderbpf.cpp bpftrace-0.11.4/src/ast/irbuilderbpf.cpp
+--- bpftrace-0.11.4.orig/src/ast/irbuilderbpf.cpp	2020-11-14 09:16:51.000000000 +0800
++++ bpftrace-0.11.4/src/ast/irbuilderbpf.cpp	2021-02-04 15:07:25.569857645 +0800
+@@ -873,6 +873,31 @@ void IRBuilderBPF::CreateGetCurrentComm(
+   CreateHelperErrorCond(ctx, call, libbpf::BPF_FUNC_get_current_comm, loc);
+ }
+ 
++void IRBuilderBPF::CreateGetCurrentExe(Value *ctx,
++                                        AllocaInst *buf,
++                                        size_t size,
++                                        const location &loc)
++{
++  assert(buf->getType()->getElementType()->isArrayTy() &&
++         buf->getType()->getElementType()->getArrayNumElements() >= size &&
++         buf->getType()->getElementType()->getArrayElementType() ==
++             getInt8Ty());
++
++  // int bpf_get_current_exe(char *buf, int size_of_buf)
++  // Return: 0 on success or negative error
++  FunctionType *getexe_func_type = FunctionType::get(
++      getInt64Ty(), { buf->getType(), getInt64Ty() }, false);
++  PointerType *getexe_func_ptr_type = PointerType::get(getexe_func_type, 0);
++  Constant *getexe_func = ConstantExpr::getCast(
++      Instruction::IntToPtr,
++      getInt64(libbpf::BPF_FUNC_get_current_exe),
++      getexe_func_ptr_type);
++  CallInst *call = createCall(getexe_func,
++                              { buf, getInt64(size) },
++                              "get_exe");
++  CreateHelperErrorCond(ctx, call, libbpf::BPF_FUNC_get_current_exe, loc);
++}
++
+ void IRBuilderBPF::CreatePerfEventOutput(Value *ctx, Value *data, size_t size)
+ {
+   assert(ctx && ctx->getType() == getInt8PtrTy());
+diff -Nurp bpftrace-0.11.4.orig/src/ast/irbuilderbpf.h bpftrace-0.11.4/src/ast/irbuilderbpf.h
+--- bpftrace-0.11.4.orig/src/ast/irbuilderbpf.h	2020-11-14 09:16:51.000000000 +0800
++++ bpftrace-0.11.4/src/ast/irbuilderbpf.h	2021-02-04 15:08:44.665368184 +0800
+@@ -82,6 +82,7 @@ public:
+   CallInst   *CreateGetJoinMap(Value *ctx, const location& loc);
+   CallInst   *createCall(Value *callee, ArrayRef<Value *> args, const Twine &Name);
+   void        CreateGetCurrentComm(Value *ctx, AllocaInst *buf, size_t size, const location& loc);
++  void        CreateGetCurrentExe(Value *ctx, AllocaInst *buf, size_t size, const location& loc);
+   void        CreatePerfEventOutput(Value *ctx, Value *data, size_t size);
+   void        CreateSignal(Value *ctx, Value *sig, const location &loc);
+   void        CreateOverrideReturn(Value *ctx, Value *rc);
+diff -Nurp bpftrace-0.11.4.orig/src/ast/semantic_analyser.cpp bpftrace-0.11.4/src/ast/semantic_analyser.cpp
+--- bpftrace-0.11.4.orig/src/ast/semantic_analyser.cpp	2020-11-14 09:16:51.000000000 +0800
++++ bpftrace-0.11.4/src/ast/semantic_analyser.cpp	2021-02-04 15:27:21.689665104 +0800
+@@ -279,6 +279,9 @@ void SemanticAnalyser::visit(Builtin &bu
+   else if (builtin.ident == "comm") {
+     builtin.type = CreateString(COMM_SIZE);
+   }
++  else if (builtin.ident == "exe") {
++    builtin.type = CreateString(EXE_SIZE);
++  }
+   else if (builtin.ident == "func") {
+     for (auto &attach_point : *probe_->attach_points)
+     {
+diff -Nurp bpftrace-0.11.4.orig/src/clang_parser.cpp bpftrace-0.11.4/src/clang_parser.cpp
+--- bpftrace-0.11.4.orig/src/clang_parser.cpp	2020-11-14 09:16:51.000000000 +0800
++++ bpftrace-0.11.4/src/clang_parser.cpp	2021-01-22 09:20:00.873588746 +0800
+@@ -104,7 +104,8 @@ static bool is_anonymous(CXCursor c)
+ #if LLVM_VERSION_MAJOR <= 7
+   return clang_Cursor_isAnonymous(c);
+ #elif LLVM_VERSION_MAJOR >= 9
+-  return clang_Cursor_isAnonymousRecordDecl(c);
++  return clang_Cursor_isAnonymous(c);
++  //return clang_Cursor_isAnonymousRecordDecl(c);
+ #else // LLVM 8
+   if (!clang_Cursor_isAnonymous(c))
+     return false;
+diff -Nurp bpftrace-0.11.4.orig/src/lexer.l bpftrace-0.11.4/src/lexer.l
+--- bpftrace-0.11.4.orig/src/lexer.l	2020-11-14 09:16:51.000000000 +0800
++++ bpftrace-0.11.4/src/lexer.l	2021-02-04 15:16:17.915587554 +0800
+@@ -28,7 +28,7 @@ hspace  [ \t]
+ vspace  [\n\r]
+ space   {hspace}|{vspace}
+ path    :(\\.|[_\-\./a-zA-Z0-9#\*])*:
+-builtin arg[0-9]|args|cgroup|comm|cpid|cpu|ctx|curtask|elapsed|func|gid|nsecs|pid|probe|rand|retval|sarg[0-9]|tid|uid|username
++builtin arg[0-9]|args|cgroup|comm|exe|cpid|cpu|ctx|curtask|elapsed|func|gid|nsecs|pid|probe|rand|retval|sarg[0-9]|tid|uid|username
+ call    avg|buf|cat|cgroupid|clear|count|delete|exit|hist|join|kaddr|ksym|lhist|max|min|ntop|override|print|printf|reg|signal|sizeof|stats|str|strncmp|sum|system|time|uaddr|usym|zero
+ 
+ /* Don't add to this! Use builtin OR call not both */
+diff -Nurp bpftrace-0.11.4.orig/src/libbpf/bpf.h bpftrace-0.11.4/src/libbpf/bpf.h
+--- bpftrace-0.11.4.orig/src/libbpf/bpf.h	2020-11-14 09:16:51.000000000 +0800
++++ bpftrace-0.11.4/src/libbpf/bpf.h	2021-02-04 16:14:30.619671968 +0800
+@@ -176,6 +176,7 @@ enum bpf_prog_type {
+ 	FN(sk_storage_delete),         \
+ 	FN(send_signal),               \
+ 	FN(tcp_gen_syncookie),         \
++	FN(get_current_exe),           \
+ 	FN(skb_output),                \
+ 	FN(probe_read_user),           \
+ 	FN(probe_read_kernel),         \
+@@ -183,7 +184,7 @@ enum bpf_prog_type {
+ 	FN(probe_read_kernel_str),     \
+ 	FN(tcp_send_ack),              \
+ 	FN(send_signal_thread),        \
+-	FN(jiffies64),
++	FN(jiffies64),                 
+ 
+ 
+ /* integer value in 'imm' field of BPF_CALL instruction selects which helper
+diff -Nurp bpftrace-0.11.4.orig/src/types.h bpftrace-0.11.4/src/types.h
+--- bpftrace-0.11.4.orig/src/types.h	2020-11-14 09:16:51.000000000 +0800
++++ bpftrace-0.11.4/src/types.h	2021-02-04 16:46:24.621562212 +0800
+@@ -15,6 +15,7 @@ const int MAX_STACK_SIZE = 1024;
+ const int DEFAULT_STACK_SIZE = 127;
+ const int STRING_SIZE = 64;
+ const int COMM_SIZE = 16;
++const int EXE_SIZE = 64;
+ 
+ enum class Type
+ {
