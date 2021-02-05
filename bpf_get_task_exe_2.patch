@@ -1,6 +1,6 @@
 diff -Nurp linux-5.4.0.orig/arch/x86/ia32/ia32_aout.c linux-5.4.0/arch/x86/ia32/ia32_aout.c
 --- linux-5.4.0.orig/arch/x86/ia32/ia32_aout.c	2019-11-25 08:32:01.000000000 +0800
-+++ linux-5.4.0/arch/x86/ia32/ia32_aout.c	2021-01-24 16:19:14.304049592 +0800
++++ linux-5.4.0/arch/x86/ia32/ia32_aout.c	2021-01-27 11:38:11.501769048 +0800
 @@ -243,6 +243,7 @@ beyond_if:
  	regs->r8 = regs->r9 = regs->r10 = regs->r11 =
  	regs->r12 = regs->r13 = regs->r14 = regs->r15 = 0;
@@ -11,7 +11,7 @@ diff -Nurp linux-5.4.0.orig/arch/x86/ia32/ia32_aout.c linux-5.4.0/arch/x86/ia32/
  
 diff -Nurp linux-5.4.0.orig/fs/binfmt_aout.c linux-5.4.0/fs/binfmt_aout.c
 --- linux-5.4.0.orig/fs/binfmt_aout.c	2019-11-25 08:32:01.000000000 +0800
-+++ linux-5.4.0/fs/binfmt_aout.c	2021-01-24 16:15:44.150373866 +0800
++++ linux-5.4.0/fs/binfmt_aout.c	2021-01-27 11:38:11.501769048 +0800
 @@ -250,6 +250,7 @@ beyond_if:
  #endif
  	finalize_exec(bprm);
@@ -21,8 +21,8 @@ diff -Nurp linux-5.4.0.orig/fs/binfmt_aout.c linux-5.4.0/fs/binfmt_aout.c
  }
  
 diff -Nurp linux-5.4.0.orig/fs/binfmt_elf.c linux-5.4.0/fs/binfmt_elf.c
---- linux-5.4.0.orig/fs/binfmt_elf.c	2021-01-24 15:54:42.000000000 +0800
-+++ linux-5.4.0/fs/binfmt_elf.c	2021-01-24 15:14:24.700144021 +0800
+--- linux-5.4.0.orig/fs/binfmt_elf.c	2021-02-05 15:51:41.000000000 +0800
++++ linux-5.4.0/fs/binfmt_elf.c	2021-01-27 11:38:11.501769048 +0800
 @@ -1152,6 +1152,7 @@ out_free_interp:
  
  	finalize_exec(bprm);
@@ -33,7 +33,7 @@ diff -Nurp linux-5.4.0.orig/fs/binfmt_elf.c linux-5.4.0/fs/binfmt_elf.c
  	kfree(loc);
 diff -Nurp linux-5.4.0.orig/fs/binfmt_elf_fdpic.c linux-5.4.0/fs/binfmt_elf_fdpic.c
 --- linux-5.4.0.orig/fs/binfmt_elf_fdpic.c	2019-11-25 08:32:01.000000000 +0800
-+++ linux-5.4.0/fs/binfmt_elf_fdpic.c	2021-01-24 16:16:58.041685444 +0800
++++ linux-5.4.0/fs/binfmt_elf_fdpic.c	2021-01-27 11:38:11.501769048 +0800
 @@ -463,6 +463,7 @@ static int load_elf_fdpic_binary(struct
  	/* everything is now ready... get the userspace context ready to roll */
  	entryaddr = interp_params.entry_addr ?: exec_params.entry_addr;
@@ -43,8 +43,8 @@ diff -Nurp linux-5.4.0.orig/fs/binfmt_elf_fdpic.c linux-5.4.0/fs/binfmt_elf_fdpi
  	retval = 0;
  
 diff -Nurp linux-5.4.0.orig/fs/binfmt_flat.c linux-5.4.0/fs/binfmt_flat.c
---- linux-5.4.0.orig/fs/binfmt_flat.c	2021-01-24 15:54:42.000000000 +0800
-+++ linux-5.4.0/fs/binfmt_flat.c	2021-01-24 16:14:57.596382387 +0800
+--- linux-5.4.0.orig/fs/binfmt_flat.c	2021-02-05 15:51:41.000000000 +0800
++++ linux-5.4.0/fs/binfmt_flat.c	2021-01-27 11:38:11.501769048 +0800
 @@ -867,6 +867,7 @@ static int load_flat_file(struct linux_b
  		       stack_len))
  		return -EFAULT;
@@ -54,8 +54,8 @@ diff -Nurp linux-5.4.0.orig/fs/binfmt_flat.c linux-5.4.0/fs/binfmt_flat.c
  err:
  	return ret;
 diff -Nurp linux-5.4.0.orig/fs/exec.c linux-5.4.0/fs/exec.c
---- linux-5.4.0.orig/fs/exec.c	2021-01-24 15:54:42.000000000 +0800
-+++ linux-5.4.0/fs/exec.c	2021-01-24 16:05:36.334184102 +0800
+--- linux-5.4.0.orig/fs/exec.c	2021-02-05 15:51:41.000000000 +0800
++++ linux-5.4.0/fs/exec.c	2021-01-27 11:38:11.505768929 +0800
 @@ -1286,6 +1286,43 @@ void __set_task_comm(struct task_struct
  	perf_event_comm(tsk, exec);
  }
@@ -101,8 +101,8 @@ diff -Nurp linux-5.4.0.orig/fs/exec.c linux-5.4.0/fs/exec.c
   * Calling this is the point of no return. None of the failures will be
   * seen by userspace since either the process is already taking a fatal
 diff -Nurp linux-5.4.0.orig/fs/proc/base.c linux-5.4.0/fs/proc/base.c
---- linux-5.4.0.orig/fs/proc/base.c	2021-01-24 15:54:42.000000000 +0800
-+++ linux-5.4.0/fs/proc/base.c	2021-01-24 10:13:49.383358057 +0800
+--- linux-5.4.0.orig/fs/proc/base.c	2021-02-05 15:51:41.000000000 +0800
++++ linux-5.4.0/fs/proc/base.c	2021-01-27 11:43:14.985113951 +0800
 @@ -375,6 +375,41 @@ static const struct file_operations proc
  	.llseek	= generic_file_llseek,
  };
@@ -116,7 +116,7 @@ diff -Nurp linux-5.4.0.orig/fs/proc/base.c linux-5.4.0/fs/proc/base.c
 +
 +	BUG_ON(*pos < 0);
 +
-+	exe = kzalloc(PATH_MAX, GFP_ATOMIC);
++	exe = kzalloc(PATH_MAX, GFP_KERNEL);
 +	if (!exe)
 +		return -ENOMEM;
 +
@@ -162,8 +162,8 @@ diff -Nurp linux-5.4.0.orig/fs/proc/base.c linux-5.4.0/fs/proc/base.c
  	REG("mountinfo",  S_IRUGO, proc_mountinfo_operations),
  #ifdef CONFIG_PROC_PAGE_MONITOR
 diff -Nurp linux-5.4.0.orig/include/linux/bpf.h linux-5.4.0/include/linux/bpf.h
---- linux-5.4.0.orig/include/linux/bpf.h	2021-01-24 15:54:42.000000000 +0800
-+++ linux-5.4.0/include/linux/bpf.h	2021-01-24 10:30:45.748889143 +0800
+--- linux-5.4.0.orig/include/linux/bpf.h	2021-02-05 15:51:41.000000000 +0800
++++ linux-5.4.0/include/linux/bpf.h	2021-01-27 11:38:11.505768929 +0800
 @@ -1049,6 +1049,7 @@ extern const struct bpf_func_proto bpf_k
  extern const struct bpf_func_proto bpf_get_current_pid_tgid_proto;
  extern const struct bpf_func_proto bpf_get_current_uid_gid_proto;
@@ -173,8 +173,8 @@ diff -Nurp linux-5.4.0.orig/include/linux/bpf.h linux-5.4.0/include/linux/bpf.h
  extern const struct bpf_func_proto bpf_get_stack_proto;
  extern const struct bpf_func_proto bpf_sock_map_update_proto;
 diff -Nurp linux-5.4.0.orig/include/linux/sched.h linux-5.4.0/include/linux/sched.h
---- linux-5.4.0.orig/include/linux/sched.h	2021-01-24 15:54:42.000000000 +0800
-+++ linux-5.4.0/include/linux/sched.h	2021-01-24 15:14:06.270434138 +0800
+--- linux-5.4.0.orig/include/linux/sched.h	2021-02-05 15:51:41.000000000 +0800
++++ linux-5.4.0/include/linux/sched.h	2021-01-27 11:38:11.505768929 +0800
 @@ -890,6 +890,7 @@ struct task_struct {
  	 * - lock it with task_lock()
  	 */
@@ -192,8 +192,8 @@ diff -Nurp linux-5.4.0.orig/include/linux/sched.h linux-5.4.0/include/linux/sche
  static inline void set_task_comm(struct task_struct *tsk, const char *from)
  {
 diff -Nurp linux-5.4.0.orig/include/uapi/linux/bpf.h linux-5.4.0/include/uapi/linux/bpf.h
---- linux-5.4.0.orig/include/uapi/linux/bpf.h	2021-01-24 15:54:42.000000000 +0800
-+++ linux-5.4.0/include/uapi/linux/bpf.h	2021-01-24 10:30:45.752886592 +0800
+--- linux-5.4.0.orig/include/uapi/linux/bpf.h	2021-02-05 15:51:41.000000000 +0800
++++ linux-5.4.0/include/uapi/linux/bpf.h	2021-01-27 11:38:11.533768100 +0800
 @@ -2862,7 +2862,8 @@ union bpf_attr {
  	FN(sk_storage_get),		\
  	FN(sk_storage_delete),		\
@@ -205,8 +205,8 @@ diff -Nurp linux-5.4.0.orig/include/uapi/linux/bpf.h linux-5.4.0/include/uapi/li
  /* integer value in 'imm' field of BPF_CALL instruction selects which helper
   * function eBPF program intends to call
 diff -Nurp linux-5.4.0.orig/kernel/bpf/core.c linux-5.4.0/kernel/bpf/core.c
---- linux-5.4.0.orig/kernel/bpf/core.c	2021-01-24 15:54:42.000000000 +0800
-+++ linux-5.4.0/kernel/bpf/core.c	2021-01-24 10:30:45.756884041 +0800
+--- linux-5.4.0.orig/kernel/bpf/core.c	2021-02-05 15:51:41.000000000 +0800
++++ linux-5.4.0/kernel/bpf/core.c	2021-01-27 11:38:11.533768100 +0800
 @@ -2040,6 +2040,7 @@ const struct bpf_func_proto bpf_ktime_ge
  const struct bpf_func_proto bpf_get_current_pid_tgid_proto __weak;
  const struct bpf_func_proto bpf_get_current_uid_gid_proto __weak;
@@ -217,8 +217,8 @@ diff -Nurp linux-5.4.0.orig/kernel/bpf/core.c linux-5.4.0/kernel/bpf/core.c
  
 diff -Nurp linux-5.4.0.orig/kernel/bpf/helpers.c linux-5.4.0/kernel/bpf/helpers.c
 --- linux-5.4.0.orig/kernel/bpf/helpers.c	2019-11-25 08:32:01.000000000 +0800
-+++ linux-5.4.0/kernel/bpf/helpers.c	2021-01-24 12:44:10.456320553 +0800
-@@ -216,6 +216,37 @@ const struct bpf_func_proto bpf_get_curr
++++ linux-5.4.0/kernel/bpf/helpers.c	2021-02-04 09:10:33.020683864 +0800
+@@ -216,6 +216,33 @@ const struct bpf_func_proto bpf_get_curr
  	.arg2_type	= ARG_CONST_SIZE,
  };
  
@@ -229,12 +229,8 @@ diff -Nurp linux-5.4.0.orig/kernel/bpf/helpers.c linux-5.4.0/kernel/bpf/helpers.
 +	if (unlikely(!tsk))
 +		goto err_clear;
 +
-+	get_task_struct(tsk);
-+	task_lock(tsk);
 +	if (tsk->exe)
 +		strncpy(buf, tsk->exe, size);
-+	task_unlock(tsk);
-+	put_task_struct(tsk);
 +
 +	buf[size - 1] = 0;
 +	return 0;
@@ -257,8 +253,8 @@ diff -Nurp linux-5.4.0.orig/kernel/bpf/helpers.c linux-5.4.0/kernel/bpf/helpers.
  
  static inline void __bpf_spin_lock(struct bpf_spin_lock *lock)
 diff -Nurp linux-5.4.0.orig/kernel/fork.c linux-5.4.0/kernel/fork.c
---- linux-5.4.0.orig/kernel/fork.c	2021-01-24 15:54:42.000000000 +0800
-+++ linux-5.4.0/kernel/fork.c	2021-01-23 18:46:56.846566321 +0800
+--- linux-5.4.0.orig/kernel/fork.c	2021-02-05 15:51:41.000000000 +0800
++++ linux-5.4.0/kernel/fork.c	2021-01-27 11:38:11.533768100 +0800
 @@ -94,6 +94,7 @@
  #include <linux/livepatch.h>
  #include <linux/thread_info.h>
@@ -284,8 +280,8 @@ diff -Nurp linux-5.4.0.orig/kernel/fork.c linux-5.4.0/kernel/fork.c
  
  free_stack:
 diff -Nurp linux-5.4.0.orig/kernel/trace/bpf_trace.c linux-5.4.0/kernel/trace/bpf_trace.c
---- linux-5.4.0.orig/kernel/trace/bpf_trace.c	2021-01-24 15:54:42.000000000 +0800
-+++ linux-5.4.0/kernel/trace/bpf_trace.c	2021-01-24 10:30:45.760881491 +0800
+--- linux-5.4.0.orig/kernel/trace/bpf_trace.c	2021-02-05 15:51:41.000000000 +0800
++++ linux-5.4.0/kernel/trace/bpf_trace.c	2021-01-27 11:38:11.537767982 +0800
 @@ -711,6 +711,8 @@ tracing_func_proto(enum bpf_func_id func
  		return &bpf_get_current_uid_gid_proto;
  	case BPF_FUNC_get_current_comm:
@@ -297,7 +293,7 @@ diff -Nurp linux-5.4.0.orig/kernel/trace/bpf_trace.c linux-5.4.0/kernel/trace/bp
  	case BPF_FUNC_get_smp_processor_id:
 diff -Nurp linux-5.4.0.orig/samples/bpf/tracex2_kern.c linux-5.4.0/samples/bpf/tracex2_kern.c
 --- linux-5.4.0.orig/samples/bpf/tracex2_kern.c	2019-11-25 08:32:01.000000000 +0800
-+++ linux-5.4.0/samples/bpf/tracex2_kern.c	2021-01-24 12:42:45.627077558 +0800
++++ linux-5.4.0/samples/bpf/tracex2_kern.c	2021-01-27 11:38:11.537767982 +0800
 @@ -64,6 +64,7 @@ static unsigned int log2l(unsigned long
  
  struct hist_key {
@@ -316,7 +312,7 @@ diff -Nurp linux-5.4.0.orig/samples/bpf/tracex2_kern.c linux-5.4.0/samples/bpf/t
  	if (value)
 diff -Nurp linux-5.4.0.orig/samples/bpf/tracex2_user.c linux-5.4.0/samples/bpf/tracex2_user.c
 --- linux-5.4.0.orig/samples/bpf/tracex2_user.c	2019-11-25 08:32:01.000000000 +0800
-+++ linux-5.4.0/samples/bpf/tracex2_user.c	2021-01-24 12:42:57.767839300 +0800
++++ linux-5.4.0/samples/bpf/tracex2_user.c	2021-01-27 11:38:11.537767982 +0800
 @@ -6,6 +6,7 @@
  #include <linux/bpf.h>
  #include <string.h>
@@ -346,8 +342,8 @@ diff -Nurp linux-5.4.0.orig/samples/bpf/tracex2_user.c linux-5.4.0/samples/bpf/t
  		print_hist_for_pid(fd, &tasks[i]);
  	}
 diff -Nurp linux-5.4.0.orig/tools/include/uapi/linux/bpf.h linux-5.4.0/tools/include/uapi/linux/bpf.h
---- linux-5.4.0.orig/tools/include/uapi/linux/bpf.h	2021-01-24 15:54:42.000000000 +0800
-+++ linux-5.4.0/tools/include/uapi/linux/bpf.h	2021-01-24 11:57:16.795448137 +0800
+--- linux-5.4.0.orig/tools/include/uapi/linux/bpf.h	2021-02-05 15:51:41.000000000 +0800
++++ linux-5.4.0/tools/include/uapi/linux/bpf.h	2021-01-27 11:38:11.537767982 +0800
 @@ -2862,7 +2862,8 @@ union bpf_attr {
  	FN(sk_storage_get),		\
  	FN(sk_storage_delete),		\
@@ -360,7 +356,7 @@ diff -Nurp linux-5.4.0.orig/tools/include/uapi/linux/bpf.h linux-5.4.0/tools/inc
   * function eBPF program intends to call
 diff -Nurp linux-5.4.0.orig/tools/include/uapi/linux/if_link.h linux-5.4.0/tools/include/uapi/linux/if_link.h
 --- linux-5.4.0.orig/tools/include/uapi/linux/if_link.h	2019-11-25 08:32:01.000000000 +0800
-+++ linux-5.4.0/tools/include/uapi/linux/if_link.h	2021-01-24 11:57:27.231156638 +0800
++++ linux-5.4.0/tools/include/uapi/linux/if_link.h	2021-01-27 11:38:11.541767863 +0800
 @@ -535,6 +535,7 @@ enum {
  	IFLA_VXLAN_GPE,
  	IFLA_VXLAN_TTL_INHERIT,
@@ -370,8 +366,8 @@ diff -Nurp linux-5.4.0.orig/tools/include/uapi/linux/if_link.h linux-5.4.0/tools
  };
  #define IFLA_VXLAN_MAX	(__IFLA_VXLAN_MAX - 1)
 diff -Nurp linux-5.4.0.orig/tools/testing/selftests/bpf/bpf_helpers.h linux-5.4.0/tools/testing/selftests/bpf/bpf_helpers.h
---- linux-5.4.0.orig/tools/testing/selftests/bpf/bpf_helpers.h	2021-01-24 15:54:42.000000000 +0800
-+++ linux-5.4.0/tools/testing/selftests/bpf/bpf_helpers.h	2021-01-24 12:42:25.495555622 +0800
+--- linux-5.4.0.orig/tools/testing/selftests/bpf/bpf_helpers.h	2021-02-05 15:51:41.000000000 +0800
++++ linux-5.4.0/tools/testing/selftests/bpf/bpf_helpers.h	2021-01-27 11:38:11.541767863 +0800
 @@ -52,6 +52,8 @@ static unsigned long long (*bpf_get_curr
  	(void *) BPF_FUNC_get_current_uid_gid;
  static int (*bpf_get_current_comm)(void *buf, int buf_size) =
